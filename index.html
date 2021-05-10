@@ -206,6 +206,9 @@
 
     function parseIngredients() {
         let inputText = document.getElementById('ingredientsInput').value.toLowerCase().trim();
+        if (inputText[inputText.length - 1] === ".") {
+            inputText = inputText.slice(0, -1);
+        }
 
         let ingredientsList;
         // let splitters = [", ", "\n"];
