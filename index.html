@@ -1,0 +1,343 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+        "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+    <title>Skincare Ingredients Checker</title>
+</head>
+<body style="background-color: lightgrey">
+<h1>Skincare Ingredients Checker</h1>
+<p>Enter product name:</p>
+<input type="text" id="productName" style="width: 650px">
+<p>How did you react to the product?</p>
+<label>
+    <input type="radio" name="productReactivity" value="5"> (5) Very helpful
+</label>
+<label>
+    <input type="radio" name="productReactivity" value="4"> (4) Slightly helpful
+</label>
+<label>
+    <input type="radio" name="productReactivity" value="3"> (3) Neutral
+</label>
+<label>
+    <input type="radio" name="productReactivity" value="2"> (2) Slightly irritating
+</label>
+<label>
+    <input type="radio" name="productReactivity" value="1"> (1) Very irritating
+</label>
+<p>Enter ingredients:</p>
+<textarea rows="10" cols="80" style="margin-bottom: 10px" id="ingredientsInput" placeholder="1) Enter ingredients list here (separated by commas, double spaces, or with each ingredient on a new line)&#10;&#10; or &#10;&#10;2) Paste exported results here and press 'Import'"></textarea>
+<br/>
+<button onclick="showPotential()">Show potential based on your list</button>
+<button onclick="addToProductList()">Add to your product list</button>
+<!--<button onclick="parseIngredients()">Parse Ingredients</button>-->
+<p id="parsedList"></p>
+<hr>
+<h3>Reference</h3>
+<p><mark style="background-color: rgba(55,255,0,0.27)">Very helpful for skin</mark> <mark style="background-color: rgba(0,255,196,0.27)">Slightly helpful</mark> <mark style="background-color: rgba(0,0,0,0.27)">Neutral</mark> <mark style="background-color: rgba(255,111,0,0.27)">Slightly irritating</mark> <mark style="background-color: rgba(255,0,0,0.27)">Very irritating</mark> <b>Has appeared in more than one product</b></p>
+<hr>
+<h3>Past products</h3>
+<!--<button onclick="saveEverythingToBrowser()">Save to browser</button>-->
+<button style="margin-bottom: 2px;" onclick="copyEverythingToClipboard()">Export (Copy to clipboard)</button>
+<button onclick="importText()">Import</button>
+<!--<button onclick="clearFromBrowser()">Clear from browser</button>-->
+<p id="clipboardGuideText" style="margin-top: 0"></p>
+<div id="pastProducts"></div>
+<script>
+    let ingredientsMap = {};
+    // based on worst reaction: 5 - positive effects on skin, 4 - slightly helps, 3 - did nothing (leans positive), 2 - some irritation, a little breaking out, 1 - bad experience
+    let resultsMap = {};
+    let ingredientsReactivityMap = {};
+
+    function showPotential() {
+        document.getElementById('parsedList').innerHTML = createProductHTML("Potential for new product", parseIngredients());
+    }
+
+    function addToProductList() {
+        let productName = document.getElementById('productName').value;
+        if (!productName) {
+            alert("Please provide a product name");
+            return;
+        }
+
+        let radios = document.getElementsByName('productReactivity');
+        let reactivity = 0;
+        for (let i = 0, length = radios.length; i < length; i++) {
+            if (radios[i].checked) {
+                reactivity = parseInt(radios[i].value);
+                break;
+            }
+        }
+        if (reactivity === 0) {
+            alert("Please mark a box for how you reacted to the product");
+            return;
+        }
+
+        ingredientsMap[productName] = parseIngredients();
+        resultsMap[document.getElementById('productName').value] = reactivity;
+        loadPastProducts();
+    }
+
+    function processPastProducts(ingredientsMap, resultsMap) {
+        let reactivityMap = {};
+        Object.keys(ingredientsMap).forEach(product => {
+            ingredientsMap[product] = parseList(ingredientsMap[product]);
+            let reactivityLevel = resultsMap[product];
+            ingredientsMap[product].forEach(ingredient => {
+                if (ingredient in reactivityMap) {
+                    // If at any time we get a reactivity level that is higher than the current, we take it
+                    // E.g. glycerin was in a product with reactivity level of 1 (very irritating).
+                    //      If it appears again in a product that worked well (4), then we know glycerin is not bad, so we bump it up to a 4.
+                    if (reactivityMap[ingredient]["reactivityLevel"] < reactivityLevel) {
+                        reactivityMap[ingredient]["reactivityLevel"] = reactivityLevel;
+                    }
+                } else {
+                    reactivityMap[ingredient] = { "reactivityLevel": reactivityLevel, "occurredIn": [] };
+                }
+                if (!(reactivityMap[ingredient]["occurredIn"].includes(product))) {
+                    reactivityMap[ingredient]["occurredIn"].push(product);
+                }
+            });
+        });
+        ingredientsReactivityMap = reactivityMap;
+    }
+
+    function createProductsHTML(products) {
+        let s = '';
+        for (let i = 0; i < products.length; i++) {
+            s += createProductHTML(products[i], ingredientsMap[products[i]]);
+        }
+        return s;
+    }
+
+    function createProductHTML(productName, ingredientsList) {
+        let mark = {
+            0: '<mark style="background-color: rgba(255,0,0,0)">', // For non-rated ingredients. (For showing product potential)
+            1: '<mark style="background-color: rgba(255,0,0,0.27)">',
+            2: '<mark style="background-color: rgba(255,111,0,0.27)">',
+            3: '<mark style="background-color: rgba(0,0,0,0.27)">',
+            4: '<mark style="background-color: rgba(0,255,196,0.27)">',
+            5: '<mark style="background-color: rgba(55,255,0,0.27)">',
+        }
+        let html = `<h4 style="display: inline">${productName}</h4><p style="display: inline"> `;
+        html += productName in resultsMap ? resultsMap[productName] : '';
+        if (productName !== "Potential for new product") {
+            html += `</p> <a href="javascript:void(0);" style="font-size: 10px" onclick="removeProduct('${productName.replace('"', '&quotBig;').replace('\'', '&quotSmall;')}')">Remove</a><p style="margin-bottom: 40px">`;
+        } else {
+            html += `</p><p style="margin-bottom: 40px">`;
+        }
+        ingredientsList.forEach(ingredient => {
+            let rating = ingredient in ingredientsReactivityMap ? ingredientsReactivityMap[ingredient]["reactivityLevel"] : 0;
+            html += `${mark[rating]}`;
+            if (ingredient in ingredientsReactivityMap && ingredientsReactivityMap[ingredient]["occurredIn"].length > 1) {
+                html += `<b>${ingredient}</b>`;
+            } else {
+                html += `${ingredient}`;
+            }
+            html += `</mark>, `;
+        });
+        html = html.substr(0, html.length - 2);
+        html += `</p>`;
+        return html;
+    }
+
+    function parseList(ingredientsList) {
+        // Continue parsing ingredients array
+        for (let i = 0; i < ingredientsList.length; i++) {
+            let removeParenthesisAndContents = true;
+            if (removeParenthesisAndContents) {
+                ingredientsList[i] = ingredientsList[i].replace(/\([^()]*\)/g, '').trim();
+            }
+
+            if (ingredientsList[i].includes("water") || ingredientsList[i].includes("aqua")) {
+                ingredientsList[i] = "water";
+            }
+
+            // Don't mess up the slashes
+            if (ingredientsList[i].includes("/")) {
+                continue;
+            }
+
+            if (ingredientsList[i].includes("ceramide 1") || ingredientsList[i].includes("ceramide eos")) {
+                ingredientsList[i] = "ceramide 1 - eos";
+            }
+
+            if (ingredientsList[i].includes("ceramide 2") || ingredientsList[i].includes("ceramide ns")) {
+                ingredientsList[i] = "ceramide 2 - ns";
+            }
+
+            if (ingredientsList[i].includes("ceramide 3") || ingredientsList[i].includes("ceramide np")) {
+                ingredientsList[i] = "ceramide 3 - np";
+            }
+
+            if (ingredientsList[i].includes("ceramide 4") || ingredientsList[i].includes("ceramide eoh")) {
+                ingredientsList[i] = "ceramide 4 - eoh";
+            }
+
+            if (ingredientsList[i].includes("ceramide 5") || ingredientsList[i].includes("ceramide as")) {
+                ingredientsList[i] = "ceramide 5 - as";
+            }
+
+            if (ingredientsList[i].includes("ceramide 6") || ingredientsList[i].includes("ceramide ap")) {
+                ingredientsList[i] = "ceramide 6 - ap";
+            }
+
+            if (ingredientsList[i].includes("ceramide 7") || ingredientsList[i].includes("ceramide ah")) {
+                ingredientsList[i] = "ceramide 7 - ah";
+            }
+
+            if (ingredientsList[i].includes("ceramide 8") || ingredientsList[i].includes("ceramide nh")) {
+                ingredientsList[i] = "ceramide 8 - nh";
+            }
+
+            if (ingredientsList[i].includes("ceramide 9") || ingredientsList[i].includes("ceramide eop")) {
+                ingredientsList[i] = "ceramide 9 - eop";
+            }
+
+            if (ingredientsList[i].includes("panthenol")) {
+                ingredientsList[i] = "panthenol - vitamin b5";
+            }
+
+            if (ingredientsList[i].includes("tocopheryl acetate")) {
+                ingredientsList[i] = "tocopheryl acetate - vitamin e";
+            }
+        }
+        return ingredientsList;
+    }
+
+    function parseIngredients() {
+        let inputText = document.getElementById('ingredientsInput').value.toLowerCase().trim();
+
+        let ingredientsList;
+        // let splitters = [", ", "\n"];
+        // splitters.forEach(splitter => {
+        //     if (inputText.split(splitter).length > 1) {
+        //         ingredientsList = inputText.split(splitter);
+        //     }
+        // });
+        if (inputText.split(",").length > 1) {
+            ingredientsList = inputText.split(", ");
+        } else if (inputText.split('  ').length > 1) {
+            ingredientsList = inputText.split('  ');
+        } else if (inputText.split('\n').length > 1) {
+            ingredientsList = inputText.split('\n');
+        } else {
+            ingredientsList = [inputText];
+        }
+        for (let i = 0; i < ingredientsList.length; i++) {
+            ingredientsList[i] = ingredientsList[i].trim();
+        }
+
+        ingredientsList = parseList(ingredientsList);
+
+        return ingredientsList;
+    }
+
+    function showParsedList(parsedList, showAsCodeList = true) {
+        if (showAsCodeList) {
+            let s = "[";
+            parsedList.forEach(item => {
+                s += '"' + item + '", ';
+            });
+            s = s.substr(0, s.length - 2) + ']';
+            document.getElementById('parsedList').innerHTML = s;
+            return;
+        }
+        document.getElementById('parsedList').innerHTML = parsedList.join('", "');
+    }
+
+    // Copied from stackoverflow
+    function copyEverythingToClipboard() {
+        let text = {
+            ingredientsMap: ingredientsMap,
+            resultsMap: resultsMap
+        };
+
+        var textArea = document.createElement("textarea");
+
+        // Place in the top-left corner of screen regardless of scroll position.
+        textArea.style.position = 'fixed';
+        textArea.style.top = 0;
+        textArea.style.left = 0;
+
+        // Ensure it has a small width and height. Setting to 1px / 1em
+        // doesn't work as this gives a negative w/h on some browsers.
+        textArea.style.width = '2em';
+        textArea.style.height = '2em';
+
+        // We don't need padding, reducing the size if it does flash render.
+        textArea.style.padding = 0;
+
+        // Clean up any borders.
+        textArea.style.border = 'none';
+        textArea.style.outline = 'none';
+        textArea.style.boxShadow = 'none';
+
+        // Avoid flash of the white box if rendered for any reason.
+        textArea.style.background = 'transparent';
+
+        textArea.value = JSON.stringify(text);
+
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+
+        try {
+            var successful = document.execCommand('copy');
+            var msg = successful ? 'successful' : 'unsuccessful';
+        } catch (err) {
+            document.getElementById("debugOutput").innerText = "Error happened when copying to clipboard. Here's the text to manually copy for yourself: " + text;
+        }
+
+        document.body.removeChild(textArea);
+
+        document.getElementById('clipboardGuideText').innerHTML = 'Copied to clipboard! Keep the results somewhere easy to find. Next time, paste the results in the "Ingredients:" text box above and press "Import" to import your info'
+    }
+
+    function saveEverythingToBrowser() {
+        localStorage.setItem("allProducts", JSON.stringify({
+            ingredientsMap: ingredientsMap,
+            resultsMap: resultsMap
+        }));
+        document.getElementById('clipboardGuideText').innerHTML = 'Saved to browser!';
+    }
+
+    function clearFromBrowser() {
+        if (confirm('Are you sure you want to clear everything from your browser?')) {
+            localStorage.removeItem('allProducts');
+            ingredientsMap = {};
+            resultsMap = {};
+            loadPastProducts();
+        }
+    }
+
+    function removeProduct(productName) {
+        let decodedProductName = productName.replace('&quotBig;', '"').replace('&quotSmall;', '\'');
+        delete ingredientsMap[decodedProductName];
+        delete resultsMap[decodedProductName];
+        loadPastProducts();
+    }
+
+    function importText() {
+        let everything = JSON.parse(document.getElementById('ingredientsInput').value);
+        document.getElementById('pastProducts').innerHTML = '';
+        ingredientsMap = everything.ingredientsMap;
+        resultsMap = everything.resultsMap;
+        loadPastProducts();
+    }
+
+    function loadPastProducts() {
+        // Webpage load functions
+        processPastProducts(ingredientsMap, resultsMap);
+        document.getElementById('pastProducts').innerHTML = createProductsHTML(Object.keys(ingredientsMap));
+    }
+
+    let allProducts = localStorage.getItem("allProducts");
+    if (allProducts) {
+        let imported = JSON.parse(allProducts);
+        ingredientsMap = imported.ingredientsMap;
+        resultsMap = imported.resultsMap;
+    }
+    loadPastProducts();
+</script>
+</body>
+</html>
